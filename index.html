@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>羽毛球队伍抽签</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes slot-spin {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(-100%); }
+    }
+    .slot-spinning {
+      animation: slot-spin 0.15s linear infinite;
+    }
+    .team-card { transition: all 0.3s ease; }
+    .team-card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+    .fade-in { animation: fadeIn 0.5s ease forwards; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .tier-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+  <div id="app" class="max-w-6xl mx-auto px-4 py-8"></div>
+
+  <script>
+// ========== 数据配置 ==========
+const EVENT_DATA = {
+  event: "2026年4月羽毛球赛",
+  tiers: {
+    A: ["张三", "李四", "王五", "赵六", "钱七", "孙八", "周九", "吴十"],
+    B: ["甲一", "甲二", "甲三", "甲四", "甲五", "甲六", "甲七", "甲八"],
+    C: ["乙一", "乙二", "乙三", "乙四", "乙五", "乙六", "乙七", "乙八"],
+    D: ["丙一", "丙二", "丙三", "丙四", "丙五", "丙六", "丙七", "丙八"],
+    E: ["丁一", "丁二", "丁三", "丁四", "丁五", "丁六", "丁七", "丁八"]
+  }
+};
+
+const TIER_COLORS = {
+  A: { bg: "bg-red-100", text: "text-red-700", badge: "bg-red-500 text-white" },
+  B: { bg: "bg-orange-100", text: "text-orange-700", badge: "bg-orange-500 text-white" },
+  C: { bg: "bg-green-100", text: "text-green-700", badge: "bg-green-500 text-white" },
+  D: { bg: "bg-blue-100", text: "text-blue-700", badge: "bg-blue-500 text-white" },
+  E: { bg: "bg-purple-100", text: "text-purple-700", badge: "bg-purple-500 text-white" }
+};
+
+// ========== 状态 ==========
+let currentPage = "home"; // home | drawing | result
+let teams = [];
+let drawingState = { currentTeam: 0, currentTier: 0, spinning: false, revealed: [] };
+
+// ========== 抽签算法 ==========
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function generateTeams() {
+  const shuffled = {};
+  for (const tier of Object.keys(EVENT_DATA.tiers)) {
+    shuffled[tier] = shuffle(EVENT_DATA.tiers[tier]);
+  }
+  const result = [];
+  for (let i = 0; i < 8; i++) {
+    result.push({
+      id: i + 1,
+      members: Object.keys(shuffled).map(tier => ({
+        name: shuffled[tier][i],
+        tier
+      }))
+    });
+  }
+  return result;
+}
+
+// ========== 渲染 ==========
+function render() {
+  const app = document.getElementById("app");
+  if (currentPage === "home") renderHome(app);
+  else if (currentPage === "drawing") renderDrawing(app);
+  else if (currentPage === "result") renderResult(app);
+}
+
+function renderHome(app) {
+  const tiers = Object.entries(EVENT_DATA.tiers);
+  app.innerHTML = `
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-gray-800 mb-2">🏸 ${EVENT_DATA.event}</h1>
+      <p class="text-gray-500">队伍抽签系统 · ${Object.values(EVENT_DATA.tiers).flat().length}人 · ${tiers.length}梯队</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+      ${tiers.map(([tier, members]) => `
+        <div class="bg-white rounded-xl shadow p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="tier-badge ${TIER_COLORS[tier].badge}">${tier}</span>
+            <span class="text-sm text-gray-500">${members.length}人</span>
+          </div>
+          <div class="space-y-1">
+            ${members.map(m => `<div class="text-sm text-gray-700 py-1 px-2 rounded ${TIER_COLORS[tier].bg}">${m}</div>`).join("")}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="text-center">
+      <button onclick="startDraw()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-lg font-semibold px-12 py-4 rounded-xl shadow-lg hover:shadow-xl transition-all">
+        🎲 开始抽签
+      </button>
+    </div>
+  `;
+}
+
+function renderDrawing(app) {
+  const { revealed } = drawingState;
+  app.innerHTML = `
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-gray-800 mb-2">🎲 抽签进行中...</h1>
+      <p class="text-gray-500">已揭晓 ${revealed.length} / 8 支队伍</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      ${teams.map((team, i) => {
+        const isRevealed = revealed.includes(i);
+        return `
+          <div class="team-card bg-white rounded-xl shadow p-4 fade-in" style="animation-delay: ${i * 0.1}s">
+            <div class="text-center font-bold text-lg mb-3 ${isRevealed ? 'text-indigo-600' : 'text-gray-400'}">
+              第 ${team.id} 队
+            </div>
+            <div class="space-y-2">
+              ${team.members.map(m => `
+                <div class="flex items-center gap-2 py-1 px-2 rounded ${isRevealed ? TIER_COLORS[m.tier].bg : 'bg-gray-100'}">
+                  <span class="tier-badge ${isRevealed ? TIER_COLORS[m.tier].badge : 'bg-gray-300 text-white'}">${m.tier}</span>
+                  <span class="text-sm ${isRevealed ? 'text-gray-800 font-medium' : 'text-gray-400'}">${isRevealed ? m.name : '???'}</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+    <div class="text-center space-x-4">
+      ${revealed.length < 8 ? `
+        <button onclick="revealNext()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-8 py-3 rounded-xl shadow-lg transition-all">
+          🎯 揭晓第 ${revealed.length + 1} 队
+        </button>
+        <button onclick="revealAll()" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold px-8 py-3 rounded-xl shadow-lg transition-all">
+          ⚡ 全部揭晓
+        </button>
+      ` : `
+        <button onclick="showResult()" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-8 py-3 rounded-xl shadow-lg transition-all">
+          📋 查看最终结果
+        </button>
+      `}
+    </div>
+  `;
+}
+
+function renderResult(app) {
+  const textResult = teams.map(t =>
+    `第${t.id}队：${t.members.map(m => `${m.name}(${m.tier})`).join(" / ")}`
+  ).join("\n");
+
+  app.innerHTML = `
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-gray-800 mb-2">🏸 抽签结果</h1>
+      <p class="text-gray-500">${EVENT_DATA.event}</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      ${teams.map((team, i) => `
+        <div class="team-card bg-white rounded-xl shadow p-4 fade-in" style="animation-delay: ${i * 0.08}s">
+          <div class="text-center font-bold text-lg mb-3 text-indigo-600">第 ${team.id} 队</div>
+          <div class="space-y-2">
+            ${team.members.map(m => `
+              <div class="flex items-center gap-2 py-1.5 px-2 rounded ${TIER_COLORS[m.tier].bg}">
+                <span class="tier-badge ${TIER_COLORS[m.tier].badge}">${m.tier}</span>
+                <span class="text-sm text-gray-800 font-medium">${m.name}</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="text-center space-x-4">
+      <button onclick="copyResult()" id="copyBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-8 py-3 rounded-xl shadow-lg transition-all">
+        📋 复制结果
+      </button>
+      <button onclick="resetAll()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-8 py-3 rounded-xl shadow-lg transition-all">
+        🔄 重新抽签
+      </button>
+    </div>
+    <textarea id="resultText" class="sr-only">${textResult}</textarea>
+  `;
+}
+
+// ========== 交互 ==========
+function startDraw() {
+  teams = generateTeams();
+  drawingState = { currentTeam: 0, currentTier: 0, spinning: false, revealed: [] };
+  currentPage = "drawing";
+  render();
+}
+
+function revealNext() {
+  const idx = drawingState.revealed.length;
+  if (idx >= 8) return;
+  drawingState.revealed.push(idx);
+  render();
+}
+
+function revealAll() {
+  drawingState.revealed = [0,1,2,3,4,5,6,7];
+  render();
+}
+
+function showResult() {
+  currentPage = "result";
+  render();
+}
+
+function copyResult() {
+  const text = document.getElementById("resultText").value;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById("copyBtn");
+    btn.textContent = "✅ 已复制";
+    setTimeout(() => { btn.textContent = "📋 复制结果"; }, 2000);
+  });
+}
+
+function resetAll() {
+  currentPage = "home";
+  teams = [];
+  render();
+}
+
+// ========== 启动 ==========
+render();
+  </script>
+</body>
+</html>
