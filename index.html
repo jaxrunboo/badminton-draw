@@ -9,7 +9,6 @@
   <div id="app" class="max-w-4xl mx-auto p-4"></div>
 
   <script>
-    // 状态管理
     let state = JSON.parse(localStorage.getItem('bd_data')) || {
       event: "2026年4月羽毛球赛",
       tiers: {
@@ -19,13 +18,13 @@
         D: ["丙一", "丙二", "丙三", "丙四", "丙五", "丙六", "丙七", "丙八"],
         E: ["丁一", "丁二", "丁三", "丁四", "丁五", "丁六", "丁七", "丁八"]
       },
-      fixedTeams: [] // [{id: 1, members: {A: '张三', B: '甲一'...}}]
+      fixedTeams: []
     };
-    let currentView = 'home'; // home, login, admin
+    let currentView = 'home';
+    let drawResult = null;
 
     function save() { localStorage.setItem('bd_data', JSON.stringify(state)); }
 
-    // 渲染函数
     function render() {
       const app = document.getElementById('app');
       if(currentView === 'home') renderHome(app);
@@ -34,13 +33,22 @@
     }
 
     function renderHome(app) {
-      app.innerHTML = `
+      let content = `
         <div class="flex justify-between items-center mb-8">
           <h1 class="text-2xl font-bold">${state.event}</h1>
           <button onclick="currentView='login';render()" class="text-sm text-gray-500 hover:text-indigo-600">管理员登录</button>
         </div>
-        <button onclick="startDraw()" class="w-full py-4 bg-indigo-600 text-white rounded-xl text-lg font-bold">🎲 开始抽签</button>
+        <button onclick="startDraw()" class="w-full py-4 bg-indigo-600 text-white rounded-xl text-lg font-bold mb-6">🎲 开始抽签</button>
       `;
+      if(drawResult) {
+        content += `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">` + drawResult.map((t, i) => `
+          <div class="bg-white p-4 rounded-xl shadow">
+            <h3 class="font-bold text-indigo-600 mb-2">队伍 ${i+1}</h3>
+            ${t.map(p => `<span class="inline-block bg-gray-100 rounded px-2 py-1 m-1 text-sm">${p}</span>`).join('')}
+          </div>
+        `).join('') + `</div>`;
+      }
+      app.innerHTML = content;
     }
 
     function renderLogin(app) {
@@ -80,42 +88,25 @@
                 </div>
               `).join('')}
             </div>
-            <div>
-              <h3 class="font-bold mb-2">固定队伍 (选择人员)</h3>
-              <div id="fixed-teams" class="space-y-2"></div>
-              <button onclick="addFixedTeam()" class="mt-2 text-indigo-600">+ 添加固定队伍</button>
-            </div>
           </div>
         </div>
       `;
-      renderFixedTeams();
     }
 
     function updateTiers(t, val) { state.tiers[t] = val.split(','); save(); }
-    
-    function addFixedTeam() {
-      state.fixedTeams.push({id: Date.now(), members: {}});
-      renderFixedTeams(); save();
-    }
-
-    function renderFixedTeams() {
-      const container = document.getElementById('fixed-teams');
-      container.innerHTML = state.fixedTeams.map((team, idx) => `
-        <div class="p-3 bg-gray-50 rounded border">
-          <div class="flex justify-between mb-2"><span>队伍 ${idx+1}</span><button onclick="state.fixedTeams.splice(${idx},1);renderFixedTeams();save()" class="text-red-500">删除</button></div>
-          ${Object.keys(state.tiers).map(t => `
-            <select class="w-full mb-1 text-sm border p-1" onchange="state.fixedTeams[${idx}].members['${t}']=this.value;save()">
-              <option value="">${t} - 选择人员</option>
-              ${state.tiers[t].map(n => `<option value="${n}" ${team.members[t]===n?'selected':''}>${n}</option>`).join('')}
-            </select>
-          `).join('')}
-        </div>
-      `).join('');
-    }
 
     function startDraw() {
-      alert("抽签逻辑执行中..."); // 这里整合之前逻辑
-      console.log('抽签数据:', state);
+      let teams = Array.from({length: 8}, () => []);
+      let pool = JSON.parse(JSON.stringify(state.tiers));
+      
+      // 随机化各梯队人选
+      Object.keys(pool).forEach(t => {
+        let members = pool[t].sort(() => Math.random() - 0.5);
+        members.forEach((m, i) => teams[i].push(m));
+      });
+      
+      drawResult = teams;
+      render();
     }
 
     render();
