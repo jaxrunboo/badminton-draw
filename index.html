@@ -106,7 +106,7 @@
         <header class="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">🏸 ${escapeHtml(state.event)}</h1>
-            <p class="text-slate-500 mt-2">支持手机和电脑，管理员可配置名单与固定队友</p>
+            <p class="text-slate-500 mt-2">支持手机和电脑，点击即可随机分队</p>
           </div>
           <button onclick="currentView='login';render()" class="self-start sm:self-auto text-sm bg-white border border-slate-200 hover:border-indigo-300 hover:text-indigo-600 px-4 py-2 rounded-xl shadow-sm transition">管理员后台</button>
         </header>
@@ -115,7 +115,7 @@
           <div class="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
             <div>
               <div class="text-sm text-slate-500">当前配置</div>
-              <div class="text-lg font-semibold mt-1">A-E 共 ${Object.values(state.tiers).reduce((a, b) => a + b.length, 0)} 人，固定组 ${state.fixedPairs.length} 组</div>
+              <div class="text-lg font-semibold mt-1">A-E 共 ${Object.values(state.tiers).reduce((a, b) => a + b.length, 0)} 人参与抽签</div>
             </div>
             <button id="drawBtn" onclick="startDraw()" class="w-full lg:w-auto py-4 px-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-lg font-bold shadow-xl transition active:scale-95">🎲 开始抽签</button>
           </div>
