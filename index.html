@@ -4,128 +4,63 @@
   <meta charset="UTF-8">
   <title>羽毛球队伍抽签</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .draw-roll { animation: roll 0.1s infinite; }
-    @keyframes roll { 0% { transform: translateY(0); } 50% { transform: translateY(5px); } 100% { transform: translateY(0); } }
-  </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <div id="app" class="max-w-4xl mx-auto p-4"></div>
+  <div id="app" class="max-w-4xl mx-auto p-4">
+    <h1 class="text-3xl font-bold text-center mb-8 text-gray-800">羽毛球队伍抽签</h1>
+    <div id="tiers" class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+      <!-- 梯队列表会在 render 后渲染 -->
+    </div>
+    <button id="drawBtn" onclick="startDraw()" class="w-full py-6 bg-indigo-600 text-white rounded-2xl text-2xl font-bold shadow-lg hover:bg-indigo-700 transition">🎲 开始抽签</button>
+    <div id="result" class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+  </div>
 
   <script>
-    let state = JSON.parse(localStorage.getItem('bd_data')) || {
-      event: "2026年4月羽毛球赛",
-      tiers: { A: ["","","","","","","",""], B: ["","","","","","","",""], C: ["","","","","","","",""], D: ["","","","","","","",""], E: ["","","","","","","",""] },
-      fixedPairs: [] // [{id: 1, members: ["张三", "甲一"]}]
+    const data = {
+      tiers: {
+        A: ["张三", "李四", "王五", "赵六", "钱七", "孙八", "周九", "吴十"],
+        B: ["甲一", "甲二", "甲三", "甲四", "甲五", "甲六", "甲七", "甲八"],
+        C: ["乙一", "乙二", "乙三", "乙四", "乙五", "乙六", "乙七", "乙八"],
+        D: ["丙一", "丙二", "丙三", "丙四", "丙五", "丙六", "丙七", "丙八"],
+        E: ["丁一", "丁二", "丁三", "丁四", "丁五", "丁六", "丁七", "丁八"]
+      }
     };
-    let currentView = 'home';
-    let drawResult = null;
 
-    function save() { localStorage.setItem('bd_data', JSON.stringify(state)); }
-
-    function render() {
-      const app = document.getElementById('app');
-      app.innerHTML = '';
-      if(currentView === 'home') renderHome(app);
-      else if(currentView === 'login') renderLogin(app);
-      else if(currentView === 'admin') renderAdmin(app);
-    }
-
-    function renderHome(app) {
-      app.innerHTML = `
-        <div class="flex justify-between items-center mb-6">
-          <h1 class="text-2xl font-bold">${state.event}</h1>
-          <button onclick="currentView='login';render()" class="text-xs bg-gray-200 px-3 py-1 rounded-full">管理</button>
+    function renderTiers() {
+      const container = document.getElementById('tiers');
+      container.innerHTML = Object.keys(data.tiers).map(t => `
+        <div class="bg-white p-4 rounded-xl shadow">
+          <h2 class="font-bold text-center mb-2 border-b">梯队 ${t}</h2>
+          ${data.tiers[t].map(p => `<div class="text-sm py-1 border-b last:border-0">${p}</div>`).join('')}
         </div>
-        <button id="drawBtn" onclick="startDraw()" class="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg">🎲 开始抽签</button>
-        <div id="resultArea" class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3"></div>
-      `;
-      if(drawResult) showResult();
+      `).join('');
     }
 
     function startDraw() {
       const btn = document.getElementById('drawBtn');
-      const area = document.getElementById('resultArea');
-      btn.disabled = true;
+      btn.innerText = "🎲 抽签中...";
+      btn.classList.add('animate-pulse');
       
-      let count = 0;
-      let timer = setInterval(() => {
-        area.classList.add('draw-roll');
-        renderTempResult(area);
-        if(count++ > 15) {
-          clearInterval(timer);
-          area.classList.remove('draw-roll');
-          finalizeDraw();
-          btn.disabled = false;
-        }
-      }, 100);
-    }
-
-    function renderTempResult(area) {
-      area.innerHTML = Array.from({length: 8}, (_,i) => `
-        <div class="bg-white p-3 rounded-lg shadow text-xs">队伍 ${i+1}: 抽签中...</div>
-      `).join('');
-    }
-
-    function finalizeDraw() {
-      let teams = Array.from({length: 8}, () => []);
-      let used = new Set();
-      
-      // 1. 先排固定组
-      state.fixedPairs.forEach((pair, i) => {
-        pair.members.forEach(m => {
-          if(m && m.trim() !== "") { teams[i%8].push(m); used.add(m); }
+      setTimeout(() => {
+        let teams = Array.from({length: 8}, () => []);
+        Object.keys(data.tiers).forEach(t => {
+          let members = [...data.tiers[t]].sort(() => Math.random() - 0.5);
+          members.forEach((m, i) => teams[i % 8].push(m));
         });
-      });
-      
-      // 2. 其余随机分配
-      Object.keys(state.tiers).forEach(t => {
-        state.tiers[t].filter(m => m && m.trim() !== "" && !used.has(m))
-        .sort(() => Math.random() - 0.5)
-        .forEach((m, i) => {
-          let teamIdx = (i + Math.floor(Math.random()*8)) % 8;
-          teams[teamIdx].push(m);
-        });
-      });
-      
-      drawResult = teams;
-      showResult();
-    }
-
-    function showResult() {
-      document.getElementById('resultArea').innerHTML = drawResult.map((t, i) => `
-        <div class="bg-white p-3 rounded-lg shadow border-l-4 border-indigo-500">
-          <h3 class="font-bold text-indigo-700 text-sm mb-1">第 ${i+1} 队</h3>
-          <div class="text-xs text-gray-600">${t.join(', ')}</div>
-        </div>
-      `).join('');
-    }
-
-    function renderAdmin(app) {
-      app.innerHTML = `
-        <div class="bg-white p-6 rounded-2xl shadow-lg">
-          <h2 class="text-lg font-bold mb-4">管理配置</h2>
-          <div class="space-y-4">
-            ${Object.keys(state.tiers).map(t => `
-              <input value="${state.tiers[t].join(',')}" onchange="state.tiers['${t}']=this.value.split(',').map(s=>s.trim());save()" class="w-full border p-2 text-sm rounded" placeholder="梯队 ${t} (用逗号分隔)">
-            `).join('')}
-            <div class="border-t pt-4">
-              <h3 class="font-bold mb-2">固定组合 (每行一组)</h3>
-              <textarea id="fixedArea" class="w-full border p-2 text-sm h-20">${state.fixedPairs.map(p=>p.members.join(',')).join('\n')}</textarea>
-            </div>
+        
+        document.getElementById('result').innerHTML = teams.map((t, i) => `
+          <div class="bg-white p-4 rounded-xl shadow border-l-4 border-indigo-500">
+            <h3 class="font-bold text-indigo-800 mb-2">第 ${i+1} 队</h3>
+            ${t.map(p => `<span class="inline-block bg-indigo-50 text-indigo-700 rounded-full px-3 py-1 m-1 text-sm">${p}</span>`).join('')}
           </div>
-          <button onclick="saveConfig();render()" class="w-full mt-6 py-2 bg-green-600 text-white rounded">保存并返回</button>
-        </div>
-      `;
+        `).join('');
+        
+        btn.innerText = "🎲 开始抽签";
+        btn.classList.remove('animate-pulse');
+      }, 1500);
     }
 
-    function saveConfig() {
-      state.fixedPairs = document.getElementById('fixedArea').value.split('\n').map(l => ({members: l.split(',').map(s=>s.trim())}));
-      save(); currentView='home';
-    }
-
-    function renderLogin(app) { app.innerHTML = '<div class="p-10"><input id="pass" type="password" class="border p-2 w-full mb-2"><button onclick="if(document.getElementById(\'pass\').value===\'admin123\'){currentView=\'admin\';render()}else{alert(\'错\')}" class="bg-black text-white p-2 w-full">登</button></div>'; }
-    render();
+    renderTiers();
   </script>
 </body>
 </html>
