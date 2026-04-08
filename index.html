@@ -2,17 +2,26 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>羽毛球队伍抽签</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .draw-anim { animation: roll 0.2s ease-in-out infinite; }
+    @keyframes roll { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+  </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-  <div id="app" class="max-w-4xl mx-auto p-4">
-    <h1 class="text-3xl font-bold text-center mb-8 text-gray-800">羽毛球队伍抽签</h1>
-    <div id="tiers" class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-      <!-- 梯队列表会在 render 后渲染 -->
+<body class="bg-slate-50 min-h-screen text-slate-800">
+  <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <header class="text-center mb-8">
+      <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">🏸 羽毛球队伍抽签</h1>
+      <p class="text-slate-500 mt-2">公平、随机、一键分队</p>
+    </header>
+
+    <button id="drawBtn" onclick="startDraw()" class="w-full max-w-lg mx-auto block py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xl font-bold shadow-xl transition-all active:scale-95">🎲 开始随机抽签</button>
+
+    <div id="result" class="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- 抽签结果卡片 -->
     </div>
-    <button id="drawBtn" onclick="startDraw()" class="w-full py-6 bg-indigo-600 text-white rounded-2xl text-2xl font-bold shadow-lg hover:bg-indigo-700 transition">🎲 开始抽签</button>
-    <div id="result" class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
   </div>
 
   <script>
@@ -26,20 +35,12 @@
       }
     };
 
-    function renderTiers() {
-      const container = document.getElementById('tiers');
-      container.innerHTML = Object.keys(data.tiers).map(t => `
-        <div class="bg-white p-4 rounded-xl shadow">
-          <h2 class="font-bold text-center mb-2 border-b">梯队 ${t}</h2>
-          ${data.tiers[t].map(p => `<div class="text-sm py-1 border-b last:border-0">${p}</div>`).join('')}
-        </div>
-      `).join('');
-    }
-
     function startDraw() {
       const btn = document.getElementById('drawBtn');
-      btn.innerText = "🎲 抽签中...";
-      btn.classList.add('animate-pulse');
+      const res = document.getElementById('result');
+      
+      btn.classList.add('draw-anim');
+      btn.innerText = "🎲 抽签运算中...";
       
       setTimeout(() => {
         let teams = Array.from({length: 8}, () => []);
@@ -48,19 +49,19 @@
           members.forEach((m, i) => teams[i % 8].push(m));
         });
         
-        document.getElementById('result').innerHTML = teams.map((t, i) => `
-          <div class="bg-white p-4 rounded-xl shadow border-l-4 border-indigo-500">
-            <h3 class="font-bold text-indigo-800 mb-2">第 ${i+1} 队</h3>
-            ${t.map(p => `<span class="inline-block bg-indigo-50 text-indigo-700 rounded-full px-3 py-1 m-1 text-sm">${p}</span>`).join('')}
+        res.innerHTML = teams.map((t, i) => `
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition">
+            <h3 class="font-bold text-indigo-600 mb-3 text-lg border-b pb-2">第 ${i+1} 队</h3>
+            <div class="space-y-1">
+              ${t.map(p => `<div class="text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg text-sm font-medium">${p}</div>`).join('')}
+            </div>
           </div>
         `).join('');
         
-        btn.innerText = "🎲 开始抽签";
-        btn.classList.remove('animate-pulse');
+        btn.classList.remove('draw-anim');
+        btn.innerText = "🎲 开始随机抽签";
       }, 1500);
     }
-
-    renderTiers();
   </script>
 </body>
 </html>
