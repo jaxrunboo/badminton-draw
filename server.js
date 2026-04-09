@@ -7,6 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const TIER_VALUES = ['A', 'B', 'C', 'D', 'E'];
 const TEAM_COUNT = 8;
+const ADMIN_DEFAULT_PASSWORD = 'obgvnb01';
 
 const DB_PATH = path.join(__dirname, 'app-data.db');
 const LEGACY_DB_PATH = path.join(__dirname, 'data.db');
@@ -81,7 +82,7 @@ function ensureDefaultConfig() {
 
   const defaultConfig = JSON.stringify({
     event: '羽毛球赛',
-    admin: { username: 'admin', password: 'admin123' },
+    admin: { username: 'admin', password: ADMIN_DEFAULT_PASSWORD },
     tiers: {
       A: ['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十'],
       B: ['甲一', '甲二', '甲三', '甲四', '甲五', '甲六', '甲七', '甲八'],
@@ -146,7 +147,7 @@ function getConfig() {
     event: parsed.event || '羽毛球赛',
     admin: {
       username: parsed.admin?.username || 'admin',
-      password: parsed.admin?.password || 'admin123'
+      password: parsed.admin?.password || ADMIN_DEFAULT_PASSWORD
     },
     fixedPairs: Array.isArray(parsed.fixedPairs) ? parsed.fixedPairs : [],
     tiers: parsed.tiers || {}
@@ -156,6 +157,25 @@ function getConfig() {
 function saveConfig(config) {
   db.prepare('UPDATE config SET data = ?, updated_at = ? WHERE id = 1')
     .run(JSON.stringify(config), nowIso());
+}
+
+function ensureAdminPassword() {
+  const config = getConfig();
+  if (!config) {
+    return;
+  }
+
+  if (config.admin?.password === ADMIN_DEFAULT_PASSWORD) {
+    return;
+  }
+
+  saveConfig({
+    ...config,
+    admin: {
+      username: config.admin?.username || 'admin',
+      password: ADMIN_DEFAULT_PASSWORD
+    }
+  });
 }
 
 function migrateLegacyManualPlayers() {
@@ -206,6 +226,7 @@ function migrateLegacyManualPlayers() {
 
 migrateLegacyDatabase();
 ensureDefaultConfig();
+ensureAdminPassword();
 migrateLegacyManualPlayers();
 
 app.use(express.json());
@@ -455,6 +476,26 @@ function resolveLatestTeams(teams) {
   return teams.map((team) => Array.isArray(team) ? team.map((member) => resolveLatestMember(member)) : []);
 }
 
+function syncConfigDerivedState() {
+  const config = getConfig();
+  if (!config) {
+    return;
+  }
+
+  const poolCandidates = getDrawPoolPlayers();
+  const validKeys = new Set(poolCandidates.map((player) => player.key));
+  const fixedPairs = sanitizeFixedPairs(config.fixedPairs, validKeys);
+
+  saveConfig({
+    ...config,
+    fixedPairs
+  });
+}
+
+function clearDrawResults() {
+  db.prepare('DELETE FROM draw_result').run();
+}
+
 app.get('/api/config', (req, res) => {
   const config = getConfig();
   const pool = getDrawPoolPlayers();
@@ -696,7 +737,23 @@ app.post('/api/admin/save', (req, res) => {
   });
 
   replaceManualPlayers();
+  syncConfigDerivedState();
   res.json({ success: true });
+});
+
+app.post('/api/admin/event/save', (req, res) => {
+  const config = checkAdmin(req, res);
+  if (!config) {
+    return;
+  }
+
+  const event = normalizeText(req.body?.event) || config.event;
+  saveConfig({
+    ...config,
+    event
+  });
+
+  res.json({ success: true, event });
 });
 
 app.post('/api/admin/fixed-pairs/save', (req, res) => {
@@ -750,14 +807,7 @@ app.post('/api/admin/registration/save', (req, res) => {
     return res.status(404).json({ error: '报名记录不存在' });
   }
 
-  const poolCandidates = getDrawPoolPlayers();
-  const validKeys = new Set(poolCandidates.map((player) => player.key));
-  const currentConfig = getConfig();
-  const fixedPairs = sanitizeFixedPairs(currentConfig.fixedPairs, validKeys);
-  saveConfig({
-    ...currentConfig,
-    fixedPairs
-  });
+  syncConfigDerivedState();
 
   res.json({ success: true });
 });
@@ -818,14 +868,28 @@ app.post('/api/admin/registrations/save', (req, res) => {
     return res.status(400).json({ error: error.message || '批量保存失败' });
   }
 
-  const poolCandidates = getDrawPoolPlayers();
-  const validKeys = new Set(poolCandidates.map((player) => player.key));
-  const currentConfig = getConfig();
-  const fixedPairs = sanitizeFixedPairs(currentConfig.fixedPairs, validKeys);
-  saveConfig({
-    ...currentConfig,
-    fixedPairs
-  });
+  syncConfigDerivedState();
+
+  res.json({ success: true });
+});
+
+app.post('/api/admin/registration/delete', (req, res) => {
+  const config = checkAdmin(req, res);
+  if (!config) {
+    return;
+  }
+
+  const id = Number(req.body?.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: '报名记录无效' });
+  }
+
+  const info = db.prepare('DELETE FROM user_account WHERE id = ?').run(id);
+  if (!info.changes) {
+    return res.status(404).json({ error: '报名记录不存在' });
+  }
+
+  syncConfigDerivedState();
 
   res.json({ success: true });
 });
@@ -838,7 +902,8 @@ app.post('/api/admin/draw', (req, res) => {
 
   const players = getDrawPoolPlayers();
   if (!players.length) {
-    return res.status(400).json({ error: '当前抽签池为空，请先配置手工名单或加入报名人员' });
+    clearDrawResults();
+    return res.json({ success: true, cleared: true, teams: [] });
   }
 
   const validKeys = new Set(players.map((player) => player.key));

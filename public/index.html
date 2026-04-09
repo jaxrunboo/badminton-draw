@@ -271,7 +271,6 @@
       app.innerHTML = `
         <div class="max-w-md mx-auto mt-10 md:mt-20 bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8">
           <h2 class="text-2xl font-bold text-slate-900 mb-2">管理员登录</h2>
-          <p class="text-slate-500 text-sm mb-6">登录后可维护手工名单、管理报名数据源和执行抽签。</p>
           <div class="space-y-4">
             <div><label class="block text-sm font-medium mb-2">用户名</label><input id="admin-username" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入用户名" /></div>
             <div><label class="block text-sm font-medium mb-2">密码</label><input id="admin-password" type="password" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入密码" /></div>
@@ -282,6 +281,27 @@
           </div>
         </div>
       `;
+    }
+
+    async function saveAdminEventOnBlur() {
+      if (!adminToken || !adminState) return;
+      const input = document.getElementById('admin-event');
+      if (!input) return;
+
+      const nextEvent = input.value.trim();
+      const currentEvent = adminState.event || '';
+      if (nextEvent === currentEvent) {
+        return;
+      }
+
+      try {
+        const data = await api('/api/admin/event/save', { ...adminToken, event: nextEvent });
+        adminState.event = data.event || currentEvent;
+        input.value = adminState.event;
+      } catch (error) {
+        input.value = currentEvent;
+        alert(error.message);
+      }
     }
 
     async function registerUser() {
@@ -449,7 +469,10 @@
               <div class="flex items-end"><label class="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm"><input id="registration-selected-${row.id}" type="checkbox" ${row.selectedForDraw ? 'checked' : ''} /><span>加入抽签池</span></label></div>
             </div>
           </div>
-          <div class="flex justify-end mt-4"><button onclick="saveRegistration(${row.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2 text-sm font-medium transition">保存该报名</button></div>
+          <div class="flex justify-end gap-3 mt-4">
+            <button onclick="deleteRegistration(${row.id})" class="bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl px-4 py-2 text-sm font-medium transition">删除该报名</button>
+            <button onclick="saveRegistration(${row.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2 text-sm font-medium transition">保存该报名</button>
+          </div>
         </div>
       `).join('')}
         <div class="flex items-center justify-between gap-3 mt-4">
@@ -496,7 +519,7 @@
             </div>
           </div>
           <section class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5"><div class="text-sm text-slate-500">当前赛事名称</div><input id="admin-event" class="w-full mt-3 border border-slate-300 rounded-xl px-4 py-3 text-sm" value="${escapeHtml(state.event || '')}" /></div>
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5"><div class="text-sm text-slate-500">当前赛事名称</div><input id="admin-event" onblur="saveAdminEventOnBlur()" class="w-full mt-3 border border-slate-300 rounded-xl px-4 py-3 text-sm" value="${escapeHtml(state.event || '')}" /></div>
             <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5"><div class="text-sm text-slate-500">抽签池总人数</div><div class="text-3xl font-bold text-slate-900 mt-2">${state.drawSummary?.totalPlayers || 0}</div></div>
             <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 xl:col-span-2"><div class="text-sm text-slate-500">梯队分布</div><div class="grid grid-cols-5 gap-2 mt-3">${TIER_VALUES.map((tier) => `<div class="rounded-2xl bg-slate-50 p-3 text-center"><div class="text-xs text-slate-400">${tier}</div><div class="text-lg font-bold text-slate-900 mt-1">${state.drawSummary?.tierCounts?.[tier] || 0}</div></div>`).join('')}</div></div>
           </section>
@@ -642,6 +665,21 @@
       }
     }
 
+    async function deleteRegistration(id) {
+      if (!adminToken) return;
+      if (!window.confirm('确认删除这条报名记录吗？删除后不可恢复。')) {
+        return;
+      }
+
+      try {
+        await api('/api/admin/registration/delete', { ...adminToken, id });
+        await refreshAdminDerivedSections();
+        alert('报名记录已删除');
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
     function refreshRegistrationList() {
       if (!adminState) return;
       const container = document.getElementById('registration-list');
@@ -735,11 +773,12 @@
           btn.classList.remove('draw-anim');
           btn.innerText = '🎲 重新抽签';
         }
-        if (result) renderTeams(data.teams);
-        else {
+        if (currentView === 'home' || !result || data.cleared) {
           currentView = 'home';
           render();
+          return;
         }
+        renderTeams(data.teams);
       } catch (error) {
         if (timer) clearInterval(timer);
         if (btn) {
