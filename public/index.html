@@ -14,212 +14,591 @@
   </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800">
-  <div id="app" class="max-w-6xl mx-auto p-4 md:p-6"></div>
+  <div id="app" class="max-w-7xl mx-auto p-4 md:p-6"></div>
   <script>
-    let currentView = 'home';
-    let cachedResult = null;
-    let cachedConfig = null;
-    let adminToken = null; // { username, password }
+    const TIER_VALUES = ['A', 'B', 'C', 'D', 'E'];
+    const STATUS_LABELS = { pending: '待审核', approved: '已通过', rejected: '已拒绝' };
 
-    function escapeHtml(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    let currentView = 'home';
+    let adminToken = loadJson('badminton-admin-token');
+    let userToken = loadJson('badminton-user-token');
+    let homeState = { config: null, result: null };
+    let adminState = null;
+
+    function loadJson(key) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function saveJson(key, value) {
+      if (!value) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
     async function api(url, body) {
-      const opts = body ? { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) } : {};
-      const res = await fetch(url, opts);
-      return res.json();
+      const options = body
+        ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        : {};
+      const response = await fetch(url, options);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || '请求失败');
+      }
+      return data;
     }
 
     function render() {
       const app = document.getElementById('app');
       if (currentView === 'home') renderHome(app);
-      else if (currentView === 'login') renderLogin(app);
-      else if (currentView === 'admin') renderAdmin(app);
+      if (currentView === 'userAuth') renderUserAuth(app);
+      if (currentView === 'myProfile') renderMyProfile(app);
+      if (currentView === 'adminLogin') renderAdminLogin(app);
+      if (currentView === 'admin') renderAdmin(app);
     }
 
-    async function renderHome(app) {
-      app.innerHTML = '<div class="text-center py-10 text-slate-400">加载中...</div>';
-      const [configData, resultData] = await Promise.all([api('/api/config'), api('/api/result')]);
-      cachedResult = resultData;
-      cachedConfig = configData;
+    function topActions() {
+      const userAction = userToken
+        ? `
+            <button onclick="currentView='myProfile';render()" class="text-sm bg-white border border-slate-200 hover:border-emerald-300 hover:text-emerald-600 px-4 py-2 rounded-xl shadow-sm transition">我的报名</button>
+            <button onclick="logoutUser()" class="text-sm bg-white border border-slate-200 hover:border-slate-300 px-4 py-2 rounded-xl shadow-sm transition">退出报名端</button>
+          `
+        : `<button onclick="currentView='userAuth';render()" class="text-sm bg-white border border-slate-200 hover:border-emerald-300 hover:text-emerald-600 px-4 py-2 rounded-xl shadow-sm transition">报名 / 注册</button>`;
 
-      app.innerHTML = `
-        <header class="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">🏸 ${escapeHtml(configData.event || '羽毛球赛')}</h1>
-            <p class="text-slate-500 mt-2">支持手机和电脑，点击即可随机分队</p>
-          </div>
-          <button onclick="currentView='login';render()" class="self-start sm:self-auto text-sm bg-white border border-slate-200 hover:border-indigo-300 hover:text-indigo-600 px-4 py-2 rounded-xl shadow-sm transition">管理员后台</button>
-        </header>
-        <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 md:p-6 mb-6">
-          <div class="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
-            <div>
-              <div class="text-sm text-slate-500">当前配置</div>
-              <div class="text-lg font-semibold mt-1">A-E 共 ${configData.totalPlayers || 0} 人参与抽签</div>
-              ${resultData.hasResult ? '<div class="text-xs text-slate-400 mt-1">最近抽签时间：' + escapeHtml(resultData.createdAt || '') + '</div>' : ''}
-            </div>
-            ${adminToken ? '<button id="drawBtn" onclick="doAdminDraw()" class="w-full lg:w-auto py-4 px-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-lg font-bold shadow-xl transition active:scale-95">🎲 开始抽签</button>' : ''}
-          </div>
-        </section>
-        <section id="result" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></section>
-      `;
+      const adminAction = adminToken
+        ? `<button onclick="currentView='admin';render()" class="text-sm bg-white border border-slate-200 hover:border-indigo-300 hover:text-indigo-600 px-4 py-2 rounded-xl shadow-sm transition">管理员后台</button>`
+        : `<button onclick="currentView='adminLogin';render()" class="text-sm bg-white border border-slate-200 hover:border-indigo-300 hover:text-indigo-600 px-4 py-2 rounded-xl shadow-sm transition">管理员登录</button>`;
 
-      if (resultData.hasResult) {
-        renderTeams(resultData.teams);
-      } else {
-        renderPlaceholder();
-      }
+      return `<div class="flex flex-wrap gap-3">${userAction}${adminAction}</div>`;
     }
 
-    function renderPlaceholder() {
-      document.getElementById('result').innerHTML = Array.from({length:8},(_,i) => `
-        <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm min-h-[180px]">
+    function getMemberDisplay(member) {
+      if (!member) return '';
+      if (typeof member === 'string') return member;
+      return member.displayName || member.name || '';
+    }
+
+    function renderTeams(teams) {
+      const container = document.getElementById('result');
+      if (!container) return;
+      container.innerHTML = (teams || []).map((team, index) => `
+        <div class="bg-white rounded-2xl border border-indigo-100 p-4 shadow-sm card-pop min-h-[180px]">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="font-bold text-slate-800">第 ${i+1} 队</h3>
-            <span class="text-xs text-slate-400">待抽签</span>
+            <h3 class="font-bold text-indigo-600 text-lg">第 ${index + 1} 队</h3>
+            <span class="text-xs text-slate-400">${team.length} 人</span>
           </div>
-          <div class="space-y-2">${Array.from({length:5},()=>'<div class="h-9 rounded-xl bg-slate-100"></div>').join('')}</div>
+          <div class="space-y-2">
+            ${team.length ? team.map((member) => `
+              <div class="bg-indigo-50 text-indigo-700 px-3 py-2 rounded-xl text-sm font-medium">
+                ${escapeHtml(getMemberDisplay(member))}
+                ${typeof member === 'object' && member.tier ? `<span class="ml-2 text-xs text-indigo-400">梯队 ${escapeHtml(member.tier)}</span>` : ''}
+              </div>
+            `).join('') : '<div class="text-sm text-slate-400">暂无成员</div>'}
+          </div>
         </div>
       `).join('');
     }
 
-    function renderTeams(teams) {
-      document.getElementById('result').innerHTML = teams.map((rawTeam,i) => {
-        const team = sortTeamMembers(rawTeam);
-        return `
-        <div class="bg-white rounded-2xl border border-indigo-100 p-4 shadow-sm card-pop min-h-[180px]">
+    function renderPlaceholder() {
+      const container = document.getElementById('result');
+      if (!container) return;
+      container.innerHTML = Array.from({ length: 8 }, (_, index) => `
+        <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm min-h-[180px]">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="font-bold text-indigo-600 text-lg">第 ${i+1} 队</h3>
-            <span class="text-xs text-slate-400">${team.length} 人</span>
+            <h3 class="font-bold text-slate-800">第 ${index + 1} 队</h3>
+            <span class="text-xs text-slate-400">待抽签</span>
           </div>
-          <div class="space-y-2">
-            ${team.length ? team.map(n=>`<div class="bg-indigo-50 text-indigo-700 px-3 py-2 rounded-xl text-sm font-medium">${escapeHtml(n)}</div>`).join('') : '<div class="text-sm text-slate-400">暂无成员</div>'}
-          </div>
+          <div class="space-y-2">${Array.from({ length: 5 }, () => '<div class="h-9 rounded-xl bg-slate-100"></div>').join('')}</div>
+        </div>
+      `).join('');
+    }
+
+    async function renderHome(app) {
+      app.innerHTML = '<div class="text-center py-10 text-slate-400">加载中...</div>';
+      try {
+        const [configData, resultData] = await Promise.all([api('/api/config'), api('/api/result')]);
+        homeState = { config: configData, result: resultData };
+        app.innerHTML = `
+          <header class="mb-8 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">🏸 ${escapeHtml(configData.event || '羽毛球赛')}</h1>
+              <p class="text-slate-500 mt-2">普通用户可报名并查看状态，管理员可维护抽签池并执行抽签。</p>
+            </div>
+            ${topActions()}
+          </header>
+          <section class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5">
+              <div class="text-sm text-slate-500">当前抽签池人数</div>
+              <div class="text-3xl font-bold text-slate-900 mt-2">${configData.totalPlayers || 0}</div>
+              <div class="text-xs text-slate-400 mt-2">包含手工名单和已入选本次抽签池的报名人员</div>
+            </div>
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5">
+              <div class="text-sm text-slate-500">梯队分布</div>
+              <div class="grid grid-cols-5 gap-2 mt-3">
+                ${TIER_VALUES.map((tier) => `
+                  <div class="rounded-2xl bg-slate-50 p-3 text-center">
+                    <div class="text-xs text-slate-400">梯队 ${tier}</div>
+                    <div class="text-lg font-bold text-slate-800 mt-1">${configData.tierCounts?.[tier] || 0}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5">
+              <div class="text-sm text-slate-500">报名提醒</div>
+              <div class="text-sm text-slate-700 mt-3 leading-6">注册后可进入“我的报名”查看状态。结果页默认公开，不强制登录。</div>
+              <div class="mt-4 flex gap-3">
+                <button onclick="currentView='userAuth';render()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-3 font-medium transition">去报名</button>
+                ${userToken ? '<button onclick="currentView=\'myProfile\';render()" class="flex-1 bg-slate-100 hover:bg-slate-200 rounded-xl py-3 font-medium transition">我的状态</button>' : ''}
+              </div>
+            </div>
+          </section>
+          <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 md:p-6 mb-6">
+            <div class="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+              <div>
+                <div class="text-sm text-slate-500">最新抽签结果</div>
+                <div class="text-lg font-semibold mt-1">${resultData.hasResult ? '已生成结果' : '暂未抽签'}</div>
+                ${resultData.hasResult ? `<div class="text-xs text-slate-400 mt-1">最近抽签时间：${escapeHtml(resultData.createdAt || '')}</div>` : ''}
+              </div>
+              ${adminToken ? '<button id="drawBtn" onclick="doAdminDraw()" class="w-full lg:w-auto py-4 px-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-lg font-bold shadow-xl transition active:scale-95">🎲 开始抽签</button>' : ''}
+            </div>
+          </section>
+          <section id="result" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></section>
+        `;
+        if (resultData.hasResult) renderTeams(resultData.teams);
+        else renderPlaceholder();
+      } catch (error) {
+        app.innerHTML = `<div class="text-center py-10 text-red-500">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function renderUserAuth(app) {
+      app.innerHTML = `
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+          <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8">
+            <h2 class="text-2xl font-bold text-slate-900 mb-2">用户注册</h2>
+            <p class="text-slate-500 text-sm mb-6">注册后自动生成报名记录，初始状态为待审核。</p>
+            <div class="space-y-4">
+              <div><label class="block text-sm font-medium mb-2">姓名</label><input id="register-name" class="w-full border border-slate-300 focus:border-emerald-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入姓名" /></div>
+              <div><label class="block text-sm font-medium mb-2">昵称</label><input id="register-nickname" class="w-full border border-slate-300 focus:border-emerald-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入昵称" /></div>
+              <div><label class="block text-sm font-medium mb-2">手机号</label><input id="register-phone" class="w-full border border-slate-300 focus:border-emerald-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入手机号" /></div>
+              <div><label class="block text-sm font-medium mb-2">密码</label><input id="register-password" type="password" class="w-full border border-slate-300 focus:border-emerald-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入密码" /></div>
+              <div class="flex gap-3 pt-2">
+                <button onclick="currentView='home';render()" class="flex-1 bg-slate-100 hover:bg-slate-200 rounded-xl py-3 font-medium transition">返回首页</button>
+                <button onclick="registerUser()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-3 font-medium transition">提交注册</button>
+              </div>
+            </div>
+          </section>
+          <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8">
+            <h2 class="text-2xl font-bold text-slate-900 mb-2">用户登录</h2>
+            <p class="text-slate-500 text-sm mb-6">已注册用户可直接登录查看自己的报名状态。</p>
+            <div class="space-y-4">
+              <div><label class="block text-sm font-medium mb-2">手机号</label><input id="login-phone" class="w-full border border-slate-300 focus:border-emerald-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入手机号" /></div>
+              <div><label class="block text-sm font-medium mb-2">密码</label><input id="login-password" type="password" class="w-full border border-slate-300 focus:border-emerald-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入密码" /></div>
+              <div class="flex gap-3 pt-2">
+                <button onclick="currentView='home';render()" class="flex-1 bg-slate-100 hover:bg-slate-200 rounded-xl py-3 font-medium transition">返回首页</button>
+                <button onclick="loginUser()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white rounded-xl py-3 font-medium transition">登录</button>
+              </div>
+            </div>
+          </section>
         </div>
       `;
-      }).join('');
     }
 
-    function sortTeamMembers(team) {
-      const tierOrder = { A: 0, B: 1, C: 2, D: 3, E: 4 };
-      const tierByName = {};
-      if (cachedConfig && cachedConfig.tiers) {
-        Object.entries(cachedConfig.tiers).forEach(([tier, members]) => {
-          (members || []).forEach(name => {
-            if (name) tierByName[name] = tier;
-          });
-        });
+    async function renderMyProfile(app) {
+      if (!userToken) {
+        currentView = 'userAuth';
+        render();
+        return;
       }
-      return [...team].sort((left, right) => {
-        const leftRank = tierOrder[tierByName[left]] ?? Number.MAX_SAFE_INTEGER;
-        const rightRank = tierOrder[tierByName[right]] ?? Number.MAX_SAFE_INTEGER;
-        return leftRank - rightRank;
-      });
-    }
-
-    async function doAdminDraw() {
-      if (!adminToken) return alert('请先登录管理员');
-      const btn = document.getElementById('drawBtn');
-      btn.disabled = true; btn.classList.add('draw-anim'); btn.innerText = '🎲 抽签中...';
-
-      const result = document.getElementById('result');
-      let ticks = 0;
-      const timer = setInterval(() => {
-        result.innerHTML = Array.from({length:8},(_,i)=>`
-          <div class="bg-white rounded-2xl border border-indigo-100 p-4 shadow-sm min-h-[180px]">
-            <h3 class="font-bold text-indigo-600 mb-3">第 ${i+1} 队</h3>
-            <div class="space-y-2">${Array.from({length:5},()=>`<div class="h-9 rounded-xl bg-indigo-50 ${ticks%2?'opacity-60':''}"></div>`).join('')}</div>
+      app.innerHTML = '<div class="text-center py-10 text-slate-400">加载中...</div>';
+      try {
+        const user = await api('/api/user/me', userToken);
+        const statusText = user.selectedForDraw ? '已入选本次抽签池' : (STATUS_LABELS[user.status] || '待审核');
+        app.innerHTML = `
+          <div class="max-w-3xl mx-auto mt-6">
+            <div class="flex items-center justify-between gap-3 mb-6">
+              <div>
+                <h2 class="text-2xl font-bold text-slate-900">我的报名信息</h2>
+                <p class="text-slate-500 text-sm mt-1">这里展示当前账号的审核状态和抽签池状态。</p>
+              </div>
+              <div class="flex gap-3">
+                <button onclick="currentView='home';render()" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm shadow-sm">返回首页</button>
+                <button onclick="logoutUser()" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm shadow-sm">退出登录</button>
+              </div>
+            </div>
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-6">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="rounded-2xl bg-slate-50 p-4"><div class="text-xs text-slate-400">姓名</div><div class="text-lg font-semibold text-slate-900 mt-2">${escapeHtml(user.name)}</div></div>
+                <div class="rounded-2xl bg-slate-50 p-4"><div class="text-xs text-slate-400">昵称</div><div class="text-lg font-semibold text-slate-900 mt-2">${escapeHtml(user.nickname || '-')}</div></div>
+                <div class="rounded-2xl bg-slate-50 p-4"><div class="text-xs text-slate-400">手机号</div><div class="text-lg font-semibold text-slate-900 mt-2">${escapeHtml(user.phone)}</div></div>
+                <div class="rounded-2xl bg-slate-50 p-4"><div class="text-xs text-slate-400">当前状态</div><div class="text-lg font-semibold mt-2 ${user.selectedForDraw ? 'text-emerald-600' : user.status === 'rejected' ? 'text-rose-600' : 'text-slate-900'}">${escapeHtml(statusText)}</div></div>
+                <div class="rounded-2xl bg-slate-50 p-4"><div class="text-xs text-slate-400">管理员分配梯队</div><div class="text-lg font-semibold text-slate-900 mt-2">${escapeHtml(user.tier || '未分配')}</div></div>
+                <div class="rounded-2xl bg-slate-50 p-4"><div class="text-xs text-slate-400">最近更新时间</div><div class="text-sm font-medium text-slate-900 mt-2 break-all">${escapeHtml(user.updatedAt || user.createdAt || '-')}</div></div>
+              </div>
+            </div>
           </div>
-        `).join('');
-        ticks++;
-      }, 140);
-
-      const data = await api('/api/admin/draw', adminToken);
-      clearInterval(timer);
-      btn.disabled = false; btn.classList.remove('draw-anim'); btn.innerText = '🎲 重新抽签';
-
-      if (data.error) return alert(data.error);
-      renderTeams(data.teams);
+        `;
+      } catch (error) {
+        userToken = null;
+        saveJson('badminton-user-token', null);
+        alert(error.message);
+        currentView = 'userAuth';
+        render();
+      }
     }
 
-    function renderLogin(app) {
+    function renderAdminLogin(app) {
       app.innerHTML = `
         <div class="max-w-md mx-auto mt-10 md:mt-20 bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8">
           <h2 class="text-2xl font-bold text-slate-900 mb-2">管理员登录</h2>
-          <p class="text-slate-500 text-sm mb-6">登录后可配置名单、执行抽签</p>
+          <p class="text-slate-500 text-sm mb-6">登录后可维护手工名单、管理报名数据源和执行抽签。</p>
           <div class="space-y-4">
-            <div><label class="block text-sm font-medium mb-2">用户名</label><input id="username" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入用户名" /></div>
-            <div><label class="block text-sm font-medium mb-2">密码</label><input id="password" type="password" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入密码" /></div>
+            <div><label class="block text-sm font-medium mb-2">用户名</label><input id="admin-username" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入用户名" /></div>
+            <div><label class="block text-sm font-medium mb-2">密码</label><input id="admin-password" type="password" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-3" placeholder="请输入密码" /></div>
             <div class="flex gap-3 pt-2">
               <button onclick="currentView='home';render()" class="flex-1 bg-slate-100 hover:bg-slate-200 rounded-xl py-3 font-medium transition">返回</button>
-              <button onclick="doLogin()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3 font-medium transition">登录</button>
+              <button onclick="loginAdmin()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3 font-medium transition">登录</button>
             </div>
           </div>
         </div>
       `;
     }
 
-    async function doLogin() {
-      const username = document.getElementById('username').value.trim();
-      const password = document.getElementById('password').value;
-      const data = await api('/api/admin/config', { username, password });
-      if (data.error) return alert(data.error);
-      adminToken = { username, password };
-      cachedConfig = data;
-      currentView = 'admin';
-      render();
+    async function registerUser() {
+      try {
+        const payload = {
+          name: document.getElementById('register-name').value.trim(),
+          nickname: document.getElementById('register-nickname').value.trim(),
+          phone: document.getElementById('register-phone').value.trim(),
+          password: document.getElementById('register-password').value
+        };
+        await api('/api/user/register', payload);
+        userToken = { phone: payload.phone, password: payload.password };
+        saveJson('badminton-user-token', userToken);
+        currentView = 'myProfile';
+        render();
+      } catch (error) {
+        alert(error.message);
+      }
     }
 
-    function renderAdmin(app) {
-      if (!cachedConfig || !adminToken) { currentView = 'login'; render(); return; }
-      const c = cachedConfig;
-      const fixedText = (c.fixedPairs || []).map(p => (p.members||[]).join(',')).filter(Boolean).join('\n');
-
-      app.innerHTML = `
-        <div class="flex items-center justify-between mb-6 gap-3">
-          <div>
-            <h2 class="text-2xl font-bold text-slate-900">管理员后台</h2>
-            <p class="text-slate-500 text-sm mt-1">配置名单和固定组后，点击保存即可生效</p>
-          </div>
-          <button onclick="adminToken=null;currentView='home';render()" class="bg-white border border-slate-200 hover:border-indigo-300 rounded-xl px-4 py-2 text-sm shadow-sm">退出登录</button>
-        </div>
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <section class="xl:col-span-2 bg-white rounded-3xl shadow-sm border border-slate-200 p-5 md:p-6">
-            <h3 class="text-lg font-bold mb-4">人员配置</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              ${['A','B','C','D','E'].map(t => `
-                <div class="bg-slate-50 rounded-2xl p-4 border border-slate-200">
-                  <label class="block text-sm font-bold text-slate-700 mb-2">梯队 ${t}</label>
-                  <textarea id="tier-${t}" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-3 py-3 text-sm min-h-[96px]" placeholder="多个名字用逗号分隔">${escapeHtml((c.tiers[t]||[]).join(','))}</textarea>
-                </div>
-              `).join('')}
-            </div>
-          </section>
-          <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 md:p-6">
-            <h3 class="text-lg font-bold mb-4">固定组队</h3>
-            <textarea id="fixed" class="w-full border border-slate-300 focus:border-indigo-500 focus:outline-none rounded-xl px-3 py-3 text-sm min-h-[260px]" placeholder="每行一组，组内人名用逗号分隔">${escapeHtml(fixedText)}</textarea>
-            <p class="text-xs text-slate-400 mt-3 leading-5">规则：每行是一组固定队友；同梯队重复只取第一个。</p>
-            <button onclick="doSaveConfig()" class="w-full mt-5 bg-green-600 hover:bg-green-700 text-white rounded-xl py-3 text-sm font-medium">保存配置</button>
-          </section>
-        </div>
-      `;
+    async function loginUser() {
+      try {
+        const payload = {
+          phone: document.getElementById('login-phone').value.trim(),
+          password: document.getElementById('login-password').value
+        };
+        await api('/api/user/login', payload);
+        userToken = payload;
+        saveJson('badminton-user-token', userToken);
+        currentView = 'myProfile';
+        render();
+      } catch (error) {
+        alert(error.message);
+      }
     }
 
-    async function doSaveConfig() {
-      const tiers = {};
-      ['A','B','C','D','E'].forEach(t => {
-        const el = document.getElementById('tier-'+t);
-        tiers[t] = (el?.value||'').split(',').map(v=>v.trim()).filter(Boolean);
-      });
-      const fixedRaw = document.getElementById('fixed')?.value || '';
-      const fixedPairs = fixedRaw.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>({members:l.split(',').map(s=>s.trim()).filter(Boolean)})).filter(g=>g.members.length>=2);
-
-      const data = await api('/api/admin/save', { ...adminToken, tiers, fixedPairs });
-      if (data.error) return alert(data.error);
-      alert('已保存');
+    function logoutUser() {
+      userToken = null;
+      saveJson('badminton-user-token', null);
       currentView = 'home';
       render();
+    }
+
+    async function loginAdmin() {
+      try {
+        const token = {
+          username: document.getElementById('admin-username').value.trim(),
+          password: document.getElementById('admin-password').value
+        };
+        adminState = await api('/api/admin/config', token);
+        adminToken = token;
+        saveJson('badminton-admin-token', adminToken);
+        currentView = 'admin';
+        render();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    function logoutAdmin() {
+      adminToken = null;
+      adminState = null;
+      saveJson('badminton-admin-token', null);
+      currentView = 'home';
+      render();
+    }
+
+    async function loadAdminState() {
+      if (!adminToken) {
+        throw new Error('请先登录管理员');
+      }
+      adminState = await api('/api/admin/config', adminToken);
+      return adminState;
+    }
+
+    function renderManualRows(rows) {
+      return rows.map((row, index) => `
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center bg-slate-50 rounded-2xl p-3">
+          <div class="lg:col-span-3"><label class="block text-xs text-slate-400 mb-1">姓名</label><input data-manual-field="name" data-index="${index}" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm" value="${escapeHtml(row.name || '')}" /></div>
+          <div class="lg:col-span-3"><label class="block text-xs text-slate-400 mb-1">昵称</label><input data-manual-field="nickname" data-index="${index}" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm" value="${escapeHtml(row.nickname || '')}" /></div>
+          <div class="lg:col-span-3"><label class="block text-xs text-slate-400 mb-1">手机号</label><input data-manual-field="phone" data-index="${index}" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm" value="${escapeHtml(row.phone || '')}" /></div>
+          <div class="lg:col-span-2"><label class="block text-xs text-slate-400 mb-1">梯队</label><select data-manual-field="tier" data-index="${index}" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm"><option value="">请选择</option>${TIER_VALUES.map((tier) => `<option value="${tier}" ${row.tier === tier ? 'selected' : ''}>${tier}</option>`).join('')}</select></div>
+          <div class="lg:col-span-1"><label class="block text-xs text-transparent mb-1">删除</label><button onclick="removeManualRow(${index})" class="w-full bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl py-2 text-sm font-medium transition">删除</button></div>
+        </div>
+      `).join('');
+    }
+
+    function statusBadge(status, selectedForDraw) {
+      if (selectedForDraw) return '<span class="inline-flex items-center rounded-full bg-emerald-50 text-emerald-600 px-3 py-1 text-xs font-medium">已入选本次抽签池</span>';
+      if (status === 'approved') return '<span class="inline-flex items-center rounded-full bg-sky-50 text-sky-600 px-3 py-1 text-xs font-medium">已通过</span>';
+      if (status === 'rejected') return '<span class="inline-flex items-center rounded-full bg-rose-50 text-rose-600 px-3 py-1 text-xs font-medium">已拒绝</span>';
+      return '<span class="inline-flex items-center rounded-full bg-amber-50 text-amber-600 px-3 py-1 text-xs font-medium">待审核</span>';
+    }
+
+    function renderRegistrationRows(rows) {
+      const filterValue = document.getElementById('registration-filter')?.value || 'all';
+      const filteredRows = rows.filter((row) => {
+        if (filterValue === 'all') return true;
+        if (filterValue === 'selected') return row.selectedForDraw;
+        return row.status === filterValue;
+      });
+      if (!filteredRows.length) {
+        return '<div class="text-sm text-slate-400 py-10 text-center">当前筛选条件下没有报名数据。</div>';
+      }
+      return filteredRows.map((row) => `
+        <div class="border border-slate-200 rounded-2xl p-4">
+          <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3">
+            <div>
+              <div class="text-lg font-semibold text-slate-900">${escapeHtml(row.name)} <span class="text-sm text-slate-400">${row.nickname ? `(${escapeHtml(row.nickname)})` : ''}</span></div>
+              <div class="text-sm text-slate-500 mt-1">${escapeHtml(row.phone)}</div>
+              <div class="mt-3">${statusBadge(row.status, row.selectedForDraw)}</div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 xl:min-w-[520px]">
+              <div><label class="block text-xs text-slate-400 mb-1">审核状态</label><select id="registration-status-${row.id}" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm"><option value="pending" ${row.status === 'pending' ? 'selected' : ''}>待审核</option><option value="approved" ${row.status === 'approved' ? 'selected' : ''}>已通过</option><option value="rejected" ${row.status === 'rejected' ? 'selected' : ''}>已拒绝</option></select></div>
+              <div><label class="block text-xs text-slate-400 mb-1">分配梯队</label><select id="registration-tier-${row.id}" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm"><option value="">未分配</option>${TIER_VALUES.map((tier) => `<option value="${tier}" ${row.tier === tier ? 'selected' : ''}>${tier}</option>`).join('')}</select></div>
+              <div class="flex items-end"><label class="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm"><input id="registration-selected-${row.id}" type="checkbox" ${row.selectedForDraw ? 'checked' : ''} /><span>加入抽签池</span></label></div>
+            </div>
+          </div>
+          <div class="flex justify-end mt-4"><button onclick="saveRegistration(${row.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2 text-sm font-medium transition">保存该报名</button></div>
+        </div>
+      `).join('');
+    }
+
+    function renderFixedGroups(state) {
+      const groups = state.fixedPairs || [];
+      if (!groups.length) return '<div class="text-sm text-slate-400">暂未配置固定组队。</div>';
+      return groups.map((group, index) => {
+        const names = (group.memberKeys || []).map((key) => {
+          const player = (state.poolCandidates || []).find((item) => item.key === key);
+          return player ? player.displayName : key;
+        });
+        return `<div class="rounded-2xl bg-slate-50 border border-slate-200 p-3 flex items-center justify-between gap-3"><div class="text-sm text-slate-700 leading-6">${escapeHtml(names.join(' / '))}</div><button onclick="removeFixedGroup(${index})" class="text-sm text-rose-600 hover:text-rose-700">删除</button></div>`;
+      }).join('');
+    }
+
+    async function renderAdmin(app) {
+      if (!adminToken) {
+        currentView = 'adminLogin';
+        render();
+        return;
+      }
+      app.innerHTML = '<div class="text-center py-10 text-slate-400">加载中...</div>';
+      try {
+        const state = await loadAdminState();
+        app.innerHTML = `
+          <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 mb-6">
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900">管理员后台</h2>
+              <p class="text-slate-500 text-sm mt-1">手工名单与报名数据源共同组成抽签池，固定组队从抽签池中选择。</p>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <button onclick="currentView='home';render()" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm shadow-sm">返回首页</button>
+              <button onclick="doAdminDraw()" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 py-2 text-sm font-medium transition">执行抽签</button>
+              <button onclick="logoutAdmin()" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm shadow-sm">退出登录</button>
+            </div>
+          </div>
+          <section class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5"><div class="text-sm text-slate-500">当前赛事名称</div><input id="admin-event" class="w-full mt-3 border border-slate-300 rounded-xl px-4 py-3 text-sm" value="${escapeHtml(state.event || '')}" /></div>
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5"><div class="text-sm text-slate-500">抽签池总人数</div><div class="text-3xl font-bold text-slate-900 mt-2">${state.drawSummary?.totalPlayers || 0}</div></div>
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 xl:col-span-2"><div class="text-sm text-slate-500">梯队分布</div><div class="grid grid-cols-5 gap-2 mt-3">${TIER_VALUES.map((tier) => `<div class="rounded-2xl bg-slate-50 p-3 text-center"><div class="text-xs text-slate-400">${tier}</div><div class="text-lg font-bold text-slate-900 mt-1">${state.drawSummary?.tierCounts?.[tier] || 0}</div></div>`).join('')}</div></div>
+          </section>
+          <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 md:p-6 mb-6">
+            <div class="flex items-center justify-between mb-4 gap-3">
+              <div><h3 class="text-lg font-bold text-slate-900">手工名单 / 直录名单</h3><p class="text-sm text-slate-500 mt-1">姓名、昵称、手机号、梯队均可维护，仅校验手机号重复。</p></div>
+              <button onclick="addManualRow()" class="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-4 py-2 text-sm font-medium transition">新增一行</button>
+            </div>
+            <div id="manual-rows" class="space-y-3">${renderManualRows(state.manualPlayers || [])}</div>
+            <div class="flex justify-end mt-5"><button onclick="saveAdminConfig()" class="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl px-5 py-3 text-sm font-medium transition">保存手工名单与固定组队</button></div>
+          </section>
+          <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 md:p-6 mb-6">
+            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 mb-4">
+              <div><h3 class="text-lg font-bold text-slate-900">报名数据源</h3><p class="text-sm text-slate-500 mt-1">支持筛选、审核、分配梯队、加入本次抽签池。</p></div>
+              <div class="w-full xl:w-56"><select id="registration-filter" onchange="refreshRegistrationList()" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm"><option value="all">全部报名</option><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已拒绝</option><option value="selected">已入选抽签池</option></select></div>
+            </div>
+            <div id="registration-list" class="space-y-4">${renderRegistrationRows(state.registrations || [])}</div>
+          </section>
+          <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 md:p-6">
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">固定组队</h3>
+                <p class="text-sm text-slate-500 mt-1">仅能从当前抽签池中勾选成员，避免名字输错。</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 max-h-[420px] overflow-auto pr-1">${(state.poolCandidates || []).map((player) => `<label class="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"><input type="checkbox" data-fixed-member="${escapeHtml(player.key)}" /><span>${escapeHtml(player.displayName)} <span class="text-slate-400">(${escapeHtml(player.tier)})</span></span></label>`).join('')}</div>
+                <button onclick="addFixedGroup()" class="w-full mt-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl py-3 text-sm font-medium transition">将勾选成员加入固定组队</button>
+              </div>
+              <div><h3 class="text-lg font-bold text-slate-900">已配置固定组队</h3><div id="fixed-group-list" class="space-y-3 mt-4">${renderFixedGroups(state)}</div></div>
+            </div>
+          </section>
+        `;
+      } catch (error) {
+        adminToken = null;
+        adminState = null;
+        saveJson('badminton-admin-token', null);
+        alert(error.message);
+        currentView = 'adminLogin';
+        render();
+      }
+    }
+
+    function addManualRow() {
+      if (!adminState) return;
+      adminState.manualPlayers.push({ name: '', nickname: '', phone: '', tier: '' });
+      document.getElementById('manual-rows').innerHTML = renderManualRows(adminState.manualPlayers);
+    }
+
+    function removeManualRow(index) {
+      if (!adminState) return;
+      adminState.manualPlayers.splice(index, 1);
+      document.getElementById('manual-rows').innerHTML = renderManualRows(adminState.manualPlayers);
+    }
+
+    function collectManualPlayers() {
+      const rows = [];
+      const total = adminState?.manualPlayers?.length || 0;
+      for (let index = 0; index < total; index += 1) {
+        rows.push({
+          name: document.querySelector(`[data-manual-field="name"][data-index="${index}"]`)?.value.trim() || '',
+          nickname: document.querySelector(`[data-manual-field="nickname"][data-index="${index}"]`)?.value.trim() || '',
+          phone: document.querySelector(`[data-manual-field="phone"][data-index="${index}"]`)?.value.trim() || '',
+          tier: document.querySelector(`[data-manual-field="tier"][data-index="${index}"]`)?.value || ''
+        });
+      }
+      return rows;
+    }
+
+    async function saveAdminConfig() {
+      if (!adminToken) return;
+      try {
+        const payload = { ...adminToken, event: document.getElementById('admin-event').value.trim(), manualPlayers: collectManualPlayers(), fixedPairs: adminState.fixedPairs || [] };
+        await api('/api/admin/save', payload);
+        alert('管理员配置已保存');
+        await loadAdminState();
+        render();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    async function saveRegistration(id) {
+      if (!adminToken) return;
+      try {
+        const payload = {
+          ...adminToken,
+          id,
+          status: document.getElementById(`registration-status-${id}`).value,
+          tier: document.getElementById(`registration-tier-${id}`).value,
+          selectedForDraw: document.getElementById(`registration-selected-${id}`).checked
+        };
+        await api('/api/admin/registration/save', payload);
+        await loadAdminState();
+        refreshRegistrationList();
+        document.getElementById('fixed-group-list').innerHTML = renderFixedGroups(adminState);
+        alert('报名记录已保存');
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    function refreshRegistrationList() {
+      if (!adminState) return;
+      const container = document.getElementById('registration-list');
+      if (container) container.innerHTML = renderRegistrationRows(adminState.registrations || []);
+    }
+
+    function addFixedGroup() {
+      if (!adminState) return;
+      const selectedKeys = Array.from(document.querySelectorAll('[data-fixed-member]:checked')).map((input) => input.getAttribute('data-fixed-member'));
+      if (selectedKeys.length < 2) {
+        alert('至少选择两名成员');
+        return;
+      }
+      adminState.fixedPairs.push({ memberKeys: selectedKeys });
+      document.getElementById('fixed-group-list').innerHTML = renderFixedGroups(adminState);
+      document.querySelectorAll('[data-fixed-member]:checked').forEach((input) => { input.checked = false; });
+    }
+
+    function removeFixedGroup(index) {
+      if (!adminState) return;
+      adminState.fixedPairs.splice(index, 1);
+      document.getElementById('fixed-group-list').innerHTML = renderFixedGroups(adminState);
+    }
+
+    async function doAdminDraw() {
+      if (!adminToken) {
+        alert('请先登录管理员');
+        return;
+      }
+      const btn = document.getElementById('drawBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('draw-anim');
+        btn.innerText = '🎲 抽签中...';
+      }
+      const result = document.getElementById('result');
+      let timer = null;
+      if (result) {
+        let ticks = 0;
+        timer = setInterval(() => {
+          result.innerHTML = Array.from({ length: 8 }, (_, index) => `<div class="bg-white rounded-2xl border border-indigo-100 p-4 shadow-sm min-h-[180px]"><h3 class="font-bold text-indigo-600 mb-3">第 ${index + 1} 队</h3><div class="space-y-2">${Array.from({ length: 5 }, () => `<div class="h-9 rounded-xl bg-indigo-50 ${ticks % 2 ? 'opacity-60' : ''}"></div>`).join('')}</div></div>`).join('');
+          ticks += 1;
+        }, 140);
+      }
+      try {
+        const data = await api('/api/admin/draw', adminToken);
+        if (timer) clearInterval(timer);
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('draw-anim');
+          btn.innerText = '🎲 重新抽签';
+        }
+        if (result) renderTeams(data.teams);
+        else {
+          currentView = 'home';
+          render();
+        }
+      } catch (error) {
+        if (timer) clearInterval(timer);
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('draw-anim');
+          btn.innerText = '🎲 开始抽签';
+        }
+        alert(error.message);
+      }
     }
 
     render();
