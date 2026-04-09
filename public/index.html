@@ -85,7 +85,9 @@
     }
 
     function renderTeams(teams) {
-      document.getElementById('result').innerHTML = teams.map((team,i) => `
+      document.getElementById('result').innerHTML = teams.map((rawTeam,i) => {
+        const team = sortTeamMembers(rawTeam);
+        return `
         <div class="bg-white rounded-2xl border border-indigo-100 p-4 shadow-sm card-pop min-h-[180px]">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-bold text-indigo-600 text-lg">第 ${i+1} 队</h3>
@@ -95,7 +97,25 @@
             ${team.length ? team.map(n=>`<div class="bg-indigo-50 text-indigo-700 px-3 py-2 rounded-xl text-sm font-medium">${escapeHtml(n)}</div>`).join('') : '<div class="text-sm text-slate-400">暂无成员</div>'}
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
+    }
+
+    function sortTeamMembers(team) {
+      const tierOrder = { A: 0, B: 1, C: 2, D: 3, E: 4 };
+      const tierByName = {};
+      if (cachedConfig && cachedConfig.tiers) {
+        Object.entries(cachedConfig.tiers).forEach(([tier, members]) => {
+          (members || []).forEach(name => {
+            if (name) tierByName[name] = tier;
+          });
+        });
+      }
+      return [...team].sort((left, right) => {
+        const leftRank = tierOrder[tierByName[left]] ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = tierOrder[tierByName[right]] ?? Number.MAX_SAFE_INTEGER;
+        return leftRank - rightRank;
+      });
     }
 
     async function doAdminDraw() {

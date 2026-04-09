@@ -70,6 +70,15 @@ function shuffle(arr) {
   return a;
 }
 
+function sortTeamMembers(team, tierByName) {
+  const tierOrder = { A: 0, B: 1, C: 2, D: 3, E: 4 };
+  return [...team].sort((left, right) => {
+    const leftRank = tierOrder[tierByName[left]] ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = tierOrder[tierByName[right]] ?? Number.MAX_SAFE_INTEGER;
+    return leftRank - rightRank;
+  });
+}
+
 function buildTeams(config) {
   const teams = Array.from({ length: 8 }, () => []);
   const used = new Set();
@@ -110,7 +119,7 @@ function buildTeams(config) {
     }
   });
 
-  return teams;
+  return teams.map(team => sortTeamMembers(team, tierByName));
 }
 
 // --- API 路由 ---
