@@ -397,6 +397,64 @@ function buildTeams(players, fixedPairs) {
   })));
 }
 
+function resolveLatestMember(member) {
+  if (!member || typeof member !== 'object' || !member.key) {
+    return member;
+  }
+
+  const key = String(member.key);
+  if (key.startsWith('user:')) {
+    const id = Number(key.slice(5));
+    if (Number.isInteger(id) && id > 0) {
+      const row = db.prepare(`
+        SELECT id, name, nickname, phone, tier
+        FROM user_account
+        WHERE id = ?
+      `).get(id);
+      if (row) {
+        return {
+          ...member,
+          name: row.name,
+          nickname: row.nickname || '',
+          phone: row.phone || '',
+          tier: row.tier || member.tier,
+          displayName: getDisplayName(row)
+        };
+      }
+    }
+  }
+
+  if (key.startsWith('manual:')) {
+    const id = Number(key.slice(7));
+    if (Number.isInteger(id) && id > 0) {
+      const row = db.prepare(`
+        SELECT id, name, nickname, phone, tier
+        FROM manual_player
+        WHERE id = ?
+      `).get(id);
+      if (row) {
+        return {
+          ...member,
+          name: row.name,
+          nickname: row.nickname || '',
+          phone: row.phone || '',
+          tier: row.tier || member.tier,
+          displayName: getDisplayName(row)
+        };
+      }
+    }
+  }
+
+  return member;
+}
+
+function resolveLatestTeams(teams) {
+  if (!Array.isArray(teams)) {
+    return [];
+  }
+  return teams.map((team) => Array.isArray(team) ? team.map((member) => resolveLatestMember(member)) : []);
+}
+
 app.get('/api/config', (req, res) => {
   const config = getConfig();
   const pool = getDrawPoolPlayers();
@@ -414,6 +472,7 @@ app.post('/api/user/register', (req, res) => {
   const nickname = normalizeText(req.body?.nickname);
   const phone = normalizePhone(req.body?.phone);
   const password = String(req.body?.password || '');
+  const tier = normalizeTier(req.body?.tier) || null;
 
   if (!name || !nickname || !phone || !password) {
     return res.status(400).json({ error: '姓名、昵称、手机号、密码不能为空' });
@@ -432,8 +491,8 @@ app.post('/api/user/register', (req, res) => {
   const timestamp = nowIso();
   const info = db.prepare(`
     INSERT INTO user_account (name, nickname, phone, password, status, tier, selected_for_draw, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'pending', NULL, 0, ?, ?)
-  `).run(name, nickname, phone, password, timestamp, timestamp);
+    VALUES (?, ?, ?, ?, 'pending', ?, 0, ?, ?)
+  `).run(name, nickname, phone, password, tier, timestamp, timestamp);
 
   const user = db.prepare(`
     SELECT id, name, nickname, phone, status, tier, selected_for_draw, created_at, updated_at
@@ -488,6 +547,46 @@ app.post('/api/user/me', (req, res) => {
     selectedForDraw: !!user.selected_for_draw,
     createdAt: user.created_at,
     updatedAt: user.updated_at
+  });
+});
+
+app.post('/api/user/profile/update', (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) {
+    return;
+  }
+
+  const name = normalizeText(req.body?.name);
+  const nickname = normalizeText(req.body?.nickname);
+  if (!name || !nickname) {
+    return res.status(400).json({ error: '姓名和昵称不能为空' });
+  }
+
+  db.prepare(`
+    UPDATE user_account
+    SET name = ?, nickname = ?, updated_at = ?
+    WHERE id = ?
+  `).run(name, nickname, nowIso(), user.id);
+
+  const updated = db.prepare(`
+    SELECT id, name, nickname, phone, status, tier, selected_for_draw, created_at, updated_at
+    FROM user_account
+    WHERE id = ?
+  `).get(user.id);
+
+  res.json({
+    success: true,
+    user: {
+      id: updated.id,
+      name: updated.name,
+      nickname: updated.nickname,
+      phone: updated.phone,
+      status: updated.status,
+      tier: updated.tier,
+      selectedForDraw: !!updated.selected_for_draw,
+      createdAt: updated.created_at,
+      updatedAt: updated.updated_at
+    }
   });
 });
 
@@ -578,19 +677,6 @@ app.post('/api/admin/save', (req, res) => {
     sanitizedManualPlayers.push({ name, nickname, phone, tier });
   }
 
-  const nextPool = [
-    ...sanitizedManualPlayers.map((row, index) => ({
-      key: `manual:new:${index}`,
-      tier: row.tier
-    })),
-    ...getSelectedRegisteredPlayers().map((row) => ({
-      key: row.key,
-      tier: row.tier
-    }))
-  ];
-  const validKeys = new Set(nextPool.map((row) => row.key));
-  const fixedPairs = sanitizeFixedPairs(req.body?.fixedPairs, validKeys);
-
   const timestamp = nowIso();
   const replaceManualPlayers = db.transaction(() => {
     db.prepare('DELETE FROM manual_player').run();
@@ -605,12 +691,29 @@ app.post('/api/admin/save', (req, res) => {
 
     saveConfig({
       ...config,
-      event,
-      fixedPairs
+      event
     });
   });
 
   replaceManualPlayers();
+  res.json({ success: true });
+});
+
+app.post('/api/admin/fixed-pairs/save', (req, res) => {
+  const config = checkAdmin(req, res);
+  if (!config) {
+    return;
+  }
+
+  const players = getDrawPoolPlayers();
+  const validKeys = new Set(players.map((player) => player.key));
+  const fixedPairs = sanitizeFixedPairs(req.body?.fixedPairs, validKeys);
+
+  saveConfig({
+    ...config,
+    fixedPairs
+  });
+
   res.json({ success: true });
 });
 
@@ -659,6 +762,74 @@ app.post('/api/admin/registration/save', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/admin/registrations/save', (req, res) => {
+  const config = checkAdmin(req, res);
+  if (!config) {
+    return;
+  }
+
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) {
+    return res.status(400).json({ error: '没有可保存的报名记录' });
+  }
+
+  const parsedItems = [];
+  for (const item of items) {
+    const id = Number(item?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: '存在无效的报名记录' });
+    }
+
+    const status = ['pending', 'approved', 'rejected'].includes(item?.status) ? item.status : 'pending';
+    const tier = normalizeTier(item?.tier) || null;
+    let selectedForDraw = !!item?.selectedForDraw;
+
+    if (selectedForDraw && status !== 'approved') {
+      return res.status(400).json({ error: '加入抽签池前请先将报名状态改为已通过' });
+    }
+    if (selectedForDraw && !tier) {
+      return res.status(400).json({ error: '加入抽签池前请先分配梯队' });
+    }
+    if (status !== 'approved') {
+      selectedForDraw = false;
+    }
+
+    parsedItems.push({ id, status, tier, selectedForDraw });
+  }
+
+  const update = db.prepare(`
+    UPDATE user_account
+    SET status = ?, tier = ?, selected_for_draw = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  const tx = db.transaction(() => {
+    parsedItems.forEach((item) => {
+      const info = update.run(item.status, item.tier, item.selectedForDraw ? 1 : 0, nowIso(), item.id);
+      if (!info.changes) {
+        throw new Error('报名记录不存在');
+      }
+    });
+  });
+
+  try {
+    tx();
+  } catch (error) {
+    return res.status(400).json({ error: error.message || '批量保存失败' });
+  }
+
+  const poolCandidates = getDrawPoolPlayers();
+  const validKeys = new Set(poolCandidates.map((player) => player.key));
+  const currentConfig = getConfig();
+  const fixedPairs = sanitizeFixedPairs(currentConfig.fixedPairs, validKeys);
+  saveConfig({
+    ...currentConfig,
+    fixedPairs
+  });
+
+  res.json({ success: true });
+});
+
 app.post('/api/admin/draw', (req, res) => {
   const config = checkAdmin(req, res);
   if (!config) {
@@ -686,9 +857,11 @@ app.get('/api/result', (req, res) => {
     return res.json({ hasResult: false });
   }
 
+  const teams = resolveLatestTeams(JSON.parse(row.result));
+
   res.json({
     hasResult: true,
-    teams: JSON.parse(row.result),
+    teams,
     createdAt: row.created_at
   });
 });

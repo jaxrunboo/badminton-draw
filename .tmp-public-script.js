@@ -1,21 +1,4 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>羽毛球队伍抽签</title>
-  <link rel="icon" href="data:," />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .draw-anim { animation: roll 0.18s ease-in-out infinite; }
-    .card-pop { animation: pop .35s ease-out both; }
-    @keyframes roll { 0%{transform:scale(1)} 50%{transform:scale(1.03)} 100%{transform:scale(1)} }
-    @keyframes pop { 0%{opacity:0;transform:translateY(10px) scale(.98)} 100%{opacity:1;transform:translateY(0) scale(1)} }
-  </style>
-</head>
-<body class="bg-slate-50 min-h-screen text-slate-800">
-  <div id="app" class="max-w-7xl mx-auto p-4 md:p-6"></div>
-  <script>
+
     const TIER_VALUES = ['A', 'B', 'C', 'D', 'E'];
     const STATUS_LABELS = { pending: '待审核', approved: '已通过', rejected: '已拒绝' };
 
@@ -752,6 +735,4 @@
     }
 
     render();
-  </script>
-</body>
-</html>
+  
